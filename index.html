@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Flixora - Discover Movies</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Navbar -->
+    <nav class="navbar" id="navbar">
+        <h1 class="logo">Flixora</h1>
+        <input type="text" class="search-box" id="searchBox" placeholder="Search movies..." autocomplete="off">
+        <div class="search-results hidden" id="searchResults"></div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero" id="hero">
+        <div class="hero-bg" id="heroBg"></div>
+        <div class="hero-gradient"></div>
+        <div class="hero-content">
+            <div class="hero-badge">Trending #1</div>
+            <h2 class="hero-title" id="heroTitle">Loading...</h2>
+            <p class="hero-desc" id="heroDesc"></p>
+            <div class="hero-meta" id="heroMeta"></div>
+            <div class="hero-actions">
+                <button class="btn-play" id="heroPlay">▶ Play</button>
+                <button class="btn-info" id="heroInfo">ℹ More Info</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Movie Sections -->
+    <main id="mainContent">
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <p>Loading Flixora...</p>
+        </div>
+    </main>
+
+    <!-- Movie Modal -->
+    <div class="modal-overlay hidden" id="modalOverlay">
+        <div class="modal">
+            <button class="modal-close" id="modalClose">✕</button>
+            <div class="modal-bg" id="modalBg"></div>
+            <div class="modal-gradient"></div>
+            <div class="modal-body">
+                <h3 class="modal-title" id="modalTitle"></h3>
+                <div class="modal-stats" id="modalStats"></div>
+                <p class="modal-overview" id="modalOverview"></p>
+                <div class="modal-genres" id="modalGenres"></div>
+                <div class="modal-cast" id="modalCast"></div>
+                <button class="btn-watch">▶ Watch Now</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast hidden" id="toast"></div>
+
+    <script src="app.js"></script>
+</body>
+  </html>
