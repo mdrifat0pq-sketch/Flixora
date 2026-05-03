@@ -1,21 +1,19 @@
-// API Config
+// ==================== CONFIG ====================
 const API_KEY = '2d2caca374aecd4dbd0f66adb29dd554';
-const BASE_URL = 'https://api.themoviedb.org/3';
-const IMAGE_URL = 'https://image.tmdb.org/t/p';
+const BASE = 'https://api.themoviedb.org/3';
+const IMG = 'https://image.tmdb.org/t/p';
 
-// Cache
-const cache = {};
+// ==================== CACHE ====================
+const cache = new Map();
 
-// Fetch from TMDB
-async function fetchAPI(endpoint) {
-    if (cache[endpoint]) return cache[endpoint];
-    
+async function fetchTMDB(endpoint) {
+    if (cache.has(endpoint)) return cache.get(endpoint);
     try {
         const sep = endpoint.includes('?') ? '&' : '?';
-        const url = `${BASE_URL}${endpoint}${sep}api_key=${API_KEY}&language=en-US`;
-        const res = await fetch(url);
+        const res = await fetch(`${BASE}${endpoint}${sep}api_key=${API_KEY}&language=en-US`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        cache[endpoint] = data;
+        cache.set(endpoint, data);
         return data;
     } catch (e) {
         console.error('API Error:', e);
@@ -23,20 +21,89 @@ async function fetchAPI(endpoint) {
     }
 }
 
-// Get image
-function getImage(path, size = 'w342') {
-    return path ? `${IMAGE_URL}/${size}${path}` : null;
+function imgUrl(path, size = 'w342') {
+    return path ? `${IMG}/${size}${path}` : null;
 }
 
-// Create card
+// ==================== TOAST ====================
+function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.remove('hidden');
+    clearTimeout(t._timeout);
+    t._timeout = setTimeout(() => t.classList.add('hidden'), 2500);
+}
+
+// ==================== TRAILER PLAYER ====================
+let currentTrailerKey = null;
+
+function playTrailer(youtubeKey, title) {
+    currentTrailerKey = youtubeKey;
+    const modal = document.getElementById('trailerModal');
+    const player = document.getElementById('youtubePlayer');
+    
+    player.innerHTML = `
+        <iframe 
+            src="https://www.youtube.com/embed/${youtubeKey}?autoplay=1&rel=0&modestbranding=1"
+            allow="autoplay; encrypted-media"
+            allowfullscreen
+            style="width:100%;height:100%;border:none;"
+        ></iframe>
+    `;
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    toast(`🎬 Playing: ${title}`);
+}
+
+function closeTrailer() {
+    document.getElementById('trailerModal').classList.add('hidden');
+    document.getElementById('youtubePlayer').innerHTML = '';
+    currentTrailerKey = null;
+    document.body.style.overflow = '';
+}
+
+document.getElementById('trailerClose').addEventListener('click', closeTrailer);
+document.getElementById('trailerModal').addEventListener('click', function(e) {
+    if (e.target === this) closeTrailer();
+});
+
+// ==================== HERO ====================
+async function setHero(movie) {
+    document.getElementById('heroBg').style.backgroundImage = 
+        `url(${imgUrl(movie.backdrop_path, 'original') || imgUrl(movie.poster_path, 'original')})`;
+    document.getElementById('heroTitle').textContent = movie.title;
+    document.getElementById('heroDesc').textContent = movie.overview || '';
+    document.getElementById('heroMeta').innerHTML = `
+        ⭐ ${movie.vote_average?.toFixed(1) || 'N/A'} 
+        • ${movie.release_date?.split('-')[0] || 'TBA'}
+        ${movie.runtime ? '• ' + movie.runtime + ' min' : ''}
+    `;
+    
+    // Get trailer key
+    const videos = await fetchTMDB(`/movie/${movie.id}/videos`);
+    const trailer = videos?.results?.find(v => v.type === 'Trailer' && v.site === 'YouTube');
+    
+    document.getElementById('heroPlay').onclick = () => {
+        if (trailer) {
+            playTrailer(trailer.key, movie.title);
+        } else {
+            toast('No trailer available for this movie');
+        }
+    };
+    
+    document.getElementById('heroInfo').onclick = () => openDetail(movie.id);
+    document.getElementById('hero').dataset.movieId = movie.id;
+}
+
+// ==================== MOVIE CARD ====================
 function makeCard(movie) {
     const card = document.createElement('div');
     card.className = 'movie-card';
-    card.onclick = () => openModal(movie.id);
+    card.title = movie.title;
 
     if (movie.poster_path) {
         const img = document.createElement('img');
-        img.src = getImage(movie.poster_path);
+        img.src = imgUrl(movie.poster_path);
         img.alt = movie.title;
         img.loading = 'lazy';
         card.appendChild(img);
@@ -47,142 +114,268 @@ function makeCard(movie) {
         card.appendChild(ph);
     }
 
-    const label = document.createElement('div');
-    label.className = 'card-label';
-    label.textContent = movie.title;
-    card.appendChild(label);
+    // Play button
+    const playBtn = document.createElement('button');
+    playBtn.className = 'card-play-btn';
+    playBtn.textContent = '▶';
+    playBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const videos = await fetchTMDB(`/movie/${movie.id}/videos`);
+        const trailer = videos?.results?.find(v => v.type === 'Trailer' && v.site === 'YouTube');
+        if (trailer) {
+            playTrailer(trailer.key, movie.title);
+        } else {
+            toast('No trailer available');
+        }
+    };
+    card.appendChild(playBtn);
 
-    if (movie.vote_average) {
-        const rating = document.createElement('div');
-        rating.className = 'card-rating';
-        rating.textContent = '⭐ ' + movie.vote_average.toFixed(1);
-        card.appendChild(rating);
-    }
+    // Overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'card-overlay';
+    overlay.innerHTML = `
+        <div class="card-title">${movie.title}</div>
+        <div class="card-rating">⭐ ${movie.vote_average?.toFixed(1) || 'N/A'}</div>
+    `;
+    card.appendChild(overlay);
 
+    card.addEventListener('click', () => openDetail(movie.id));
     return card;
 }
 
-// Make section
-function makeSection(title, movies) {
+// ==================== GRID SECTION ====================
+function makeSection(title, movies, flag = '') {
     const sec = document.createElement('div');
     sec.className = 'section';
+    sec.innerHTML = `<h3 class="section-title"><span class="flag">${flag}</span>${title}</h3>`;
     
-    const h3 = document.createElement('h3');
-    h3.className = 'section-title';
-    h3.textContent = title;
-    sec.appendChild(h3);
+    const grid = document.createElement('div');
+    grid.className = 'movie-grid';
+    movies.forEach(m => { if (m.poster_path) grid.appendChild(makeCard(m)); });
     
-    const row = document.createElement('div');
-    row.className = 'movie-row';
-    movies.slice(0, 12).forEach(m => {
-        if (m.poster_path) row.appendChild(makeCard(m));
-    });
-    sec.appendChild(row);
-    
+    sec.appendChild(grid);
     return sec;
 }
 
-// Update hero
-function setHero(movie) {
-    document.getElementById('heroBg').style.backgroundImage = 
-        `url(${getImage(movie.backdrop_path, 'original') || getImage(movie.poster_path, 'original')})`;
-    document.getElementById('heroTitle').textContent = movie.title;
-    document.getElementById('heroDesc').textContent = movie.overview || '';
-    document.getElementById('heroMeta').textContent = 
-        `⭐ ${movie.vote_average?.toFixed(1) || 'N/A'} • ${movie.release_date?.split('-')[0] || 'TBA'}`;
-    
-    document.getElementById('hero').dataset.movieId = movie.id;
-    document.getElementById('heroInfo').onclick = () => openModal(movie.id);
-}
+// ==================== DETAIL MODAL ====================
+let currentMovieId = null;
 
-// Open modal
-async function openModal(id) {
-    const modal = document.getElementById('modalOverlay');
+async function openDetail(movieId) {
+    currentMovieId = movieId;
+    const modal = document.getElementById('detailModal');
     modal.classList.remove('hidden');
-    
+    document.body.style.overflow = 'hidden';
+
     document.getElementById('modalTitle').textContent = 'Loading...';
     document.getElementById('modalStats').textContent = '';
     document.getElementById('modalOverview').textContent = '';
     document.getElementById('modalGenres').innerHTML = '';
     document.getElementById('modalCast').innerHTML = '';
-    
-    const movie = await fetchAPI(`/movie/${id}?append_to_response=credits`);
-    if (!movie) return;
-    
+    document.getElementById('modalSimilar').innerHTML = '';
+
+    const movie = await fetchTMDB(`/movie/${movieId}?append_to_response=credits,similar,videos`);
+    if (!movie) { toast('Failed to load details'); return; }
+
     document.getElementById('modalBg').style.backgroundImage = 
-        `url(${getImage(movie.backdrop_path, 'original') || getImage(movie.poster_path, 'w780')})`;
+        `url(${imgUrl(movie.backdrop_path, 'original') || imgUrl(movie.poster_path, 'w780')})`;
     document.getElementById('modalTitle').textContent = movie.title;
-    document.getElementById('modalStats').textContent = 
-        `⭐ ${movie.vote_average?.toFixed(1)} • ${movie.release_date?.split('-')[0]} • ${movie.runtime} min`;
-    document.getElementById('modalOverview').textContent = movie.overview || 'No overview';
-    
+    document.getElementById('modalStats').innerHTML = `
+        ⭐ ${movie.vote_average?.toFixed(1)} 
+        • ${movie.release_date?.split('-')[0]} 
+        • ${movie.runtime} min
+        • ${movie.original_language?.toUpperCase()}
+    `;
+    document.getElementById('modalOverview').textContent = movie.overview || 'No overview available.';
+
+    // Trailer button
+    const trailer = movie.videos?.results?.find(v => v.type === 'Trailer' && v.site === 'YouTube');
+    document.getElementById('modalPlay').onclick = () => {
+        if (trailer) {
+            closeDetail();
+            playTrailer(trailer.key, movie.title);
+        } else {
+            toast('No trailer available');
+        }
+    };
+
+    // Genres
     if (movie.genres) {
         document.getElementById('modalGenres').innerHTML = movie.genres
             .map(g => `<span class="genre-badge">${g.name}</span>`).join('');
     }
-    
+
+    // Cast
     if (movie.credits?.cast) {
         const castDiv = document.getElementById('modalCast');
-        movie.credits.cast.slice(0, 10).forEach(actor => {
-            const c = document.createElement('div');
-            c.className = 'cast-card';
-            c.innerHTML = `
-                <img src="${getImage(actor.profile_path, 'w185') || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23333%22 width=%2250%22 height=%2250%22/><text x=%2225%22 y=%2230%22 text-anchor=%22middle%22 fill=%22%23555%22>?</text></svg>'}" alt="">
+        movie.credits.cast.slice(0, 12).forEach(actor => {
+            const card = document.createElement('div');
+            card.className = 'cast-card';
+            card.innerHTML = `
+                <img src="${imgUrl(actor.profile_path, 'w185') || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23333%22 width=%2250%22 height=%2250%22/><text x=%2225%22 y=%2232%22 text-anchor=%22middle%22 fill=%22%23555%22 font-size=%2212%22>?</text></svg>'}" alt="${actor.name}">
                 <div class="cast-name">${actor.name.split(' ')[0]}</div>
             `;
-            castDiv.appendChild(c);
+            castDiv.appendChild(card);
+        });
+    }
+
+    // Similar movies
+    if (movie.similar?.results?.length) {
+        const simDiv = document.getElementById('modalSimilar');
+        simDiv.innerHTML = '<h4>Similar Movies</h4><div class="similar-row"></div>';
+        const row = simDiv.querySelector('.similar-row');
+        movie.similar.results.slice(0, 10).forEach(sim => {
+            if (!sim.poster_path) return;
+            const card = document.createElement('div');
+            card.className = 'similar-card';
+            card.innerHTML = `
+                <img src="${imgUrl(sim.poster_path, 'w185')}" alt="${sim.title}" loading="lazy">
+                <div class="similar-title">${sim.title}</div>
+            `;
+            card.onclick = () => openDetail(sim.id);
+            row.appendChild(card);
         });
     }
 }
 
-// Close modal
-function closeModal() {
-    document.getElementById('modalOverlay').classList.add('hidden');
-}
-document.getElementById('modalClose').onclick = closeModal;
-document.getElementById('modalOverlay').onclick = (e) => {
-    if (e.target === e.currentTarget) closeModal();
-};
-
-// Toast
-function toast(msg) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.remove('hidden');
-    setTimeout(() => t.classList.add('hidden'), 2500);
+function closeDetail() {
+    document.getElementById('detailModal').classList.add('hidden');
+    document.body.style.overflow = '';
+    currentMovieId = null;
 }
 
-// Search
-let timer;
+document.getElementById('detailClose').addEventListener('click', closeDetail);
+document.getElementById('detailModal').addEventListener('click', function(e) {
+    if (e.target === this) closeDetail();
+});
+
+// ==================== TABS ====================
+const categories = [
+    { id: 'korean', name: '🇰🇷 Korean Drama', query: 'korean drama', discover: '&with_original_language=ko&sort_by=popularity.desc' },
+    { id: 'indonesian', name: '🇮🇩 Indonesian', query: 'indonesian movie', discover: '&with_original_language=id&sort_by=popularity.desc' },
+    { id: 'japanese', name: '🇯🇵 Japanese', query: 'japanese movie', discover: '&with_original_language=ja&sort_by=popularity.desc' },
+    { id: 'chinese', name: '🇨🇳 Chinese', query: 'chinese movie', discover: '&with_original_language=zh&sort_by=popularity.desc' },
+    { id: 'hollywood', name: '🎬 Hollywood', query: 'hollywood', discover: '&with_original_language=en&sort_by=popularity.desc&vote_count.gte=100' },
+];
+
+// Tab switching
+document.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        const tab = this.dataset.tab;
+        if (tab === 'home') {
+            loadHome();
+        } else {
+            loadCategory(tab);
+        }
+        document.getElementById('mainContent').scrollIntoView({ behavior: 'smooth' });
+    });
+});
+
+// ==================== LOAD HOME ====================
+async function loadHome() {
+    const main = document.getElementById('mainContent');
+    main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Loading Flixora...</p></div>';
+
+    const [trending, popular, topRated] = await Promise.all([
+        fetchTMDB('/trending/movie/week'),
+        fetchTMDB('/movie/popular'),
+        fetchTMDB('/movie/top_rated')
+    ]);
+
+    main.innerHTML = '';
+
+    if (trending?.results?.length) {
+        main.appendChild(makeSection('🔥 Trending Worldwide', trending.results));
+        const heroMovie = await fetchTMDB(`/movie/${trending.results[0].id}`);
+        if (heroMovie) setHero(heroMovie);
+    }
+    if (popular?.results?.length) main.appendChild(makeSection('🎬 Popular Movies', popular.results));
+    if (topRated?.results?.length) main.appendChild(makeSection('⭐ Top Rated', topRated.results));
+}
+
+// ==================== LOAD CATEGORY ====================
+async function loadCategory(catId) {
+    const cat = categories.find(c => c.id === catId);
+    if (!cat) return;
+
+    const main = document.getElementById('mainContent');
+    main.innerHTML = '<div class="loader"><div class="spinner"></div><p>Loading ' + cat.name + '...</p></div>';
+
+    // Fetch by genre + keyword
+    const [discResults, searchResults] = await Promise.all([
+        fetchTMDB(`/discover/movie?sort_by=popularity.desc&vote_count.gte=10${cat.discover}`),
+        fetchTMDB(`/search/movie?query=${encodeURIComponent(cat.query)}`)
+    ]);
+
+    main.innerHTML = '';
+
+    const allMovies = [];
+    const seen = new Set();
+
+    // Combine results
+    [discResults, searchResults].forEach(data => {
+        if (data?.results) {
+            data.results.forEach(m => {
+                if (!seen.has(m.id) && m.poster_path) {
+                    seen.add(m.id);
+                    allMovies.push(m);
+                }
+            });
+        }
+    });
+
+    if (allMovies.length > 0) {
+        main.appendChild(makeSection(cat.name + ' Movies', allMovies));
+        
+        // Set hero
+        const heroMovie = await fetchTMDB(`/movie/${allMovies[0].id}`);
+        if (heroMovie) setHero(heroMovie);
+    } else {
+        main.innerHTML = '<div class="loader"><p>No movies found for this category. Try again later.</p></div>';
+    }
+}
+
+// ==================== SEARCH ====================
+let searchTimer;
 document.getElementById('searchBox').addEventListener('input', function() {
-    clearTimeout(timer);
-    const q = this.value.trim();
-    if (q.length < 2) {
+    clearTimeout(searchTimer);
+    const query = this.value.trim();
+    
+    if (query.length < 2) {
         document.getElementById('searchResults').classList.add('hidden');
         return;
     }
-    timer = setTimeout(async () => {
-        const data = await fetchAPI(`/search/movie?query=${encodeURIComponent(q)}`);
+
+    searchTimer = setTimeout(async () => {
+        const data = await fetchTMDB(`/search/movie?query=${encodeURIComponent(query)}`);
         const container = document.getElementById('searchResults');
         container.innerHTML = '';
+
         if (data?.results?.length) {
-            data.results.slice(0, 8).forEach(m => {
+            data.results.slice(0, 10).forEach(m => {
                 const item = document.createElement('div');
                 item.className = 'search-item';
                 item.innerHTML = `
-                    <img src="${getImage(m.poster_path, 'w92') || ''}" alt="">
+                    <img src="${imgUrl(m.poster_path, 'w92') || ''}" alt="">
                     <div>
                         <div class="search-item-title">${m.title}</div>
-                        <div class="search-item-year">${m.release_date || 'TBA'} • ⭐ ${m.vote_average || 'N/A'}</div>
+                        <div class="search-item-meta">
+                            <span>⭐ ${m.vote_average?.toFixed(1) || 'N/A'}</span>
+                            <span>${m.release_date?.split('-')[0] || 'TBA'}</span>
+                        </div>
                     </div>
                 `;
-                item.onclick = () => {
-                    openModal(m.id);
+                item.addEventListener('click', () => {
+                    openDetail(m.id);
                     container.classList.add('hidden');
                     document.getElementById('searchBox').value = '';
-                };
+                });
                 container.appendChild(item);
             });
+            container.classList.remove('hidden');
+        } else {
+            container.innerHTML = '<div style="padding:16px;color:#999;text-align:center;">No results found</div>';
             container.classList.remove('hidden');
         }
     }, 400);
@@ -194,35 +387,18 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// Load app
-async function init() {
-    const [trending, popular, topRated, upcoming, nowPlaying] = await Promise.all([
-        fetchAPI('/trending/movie/week'),
-        fetchAPI('/movie/popular'),
-        fetchAPI('/movie/top_rated'),
-        fetchAPI('/movie/upcoming'),
-        fetchAPI('/movie/now_playing')
-    ]);
-    
-    const main = document.getElementById('mainContent');
-    main.innerHTML = '';
-    
-    if (trending?.results?.length) {
-        main.appendChild(makeSection('🔥 Trending Now', trending.results));
-        const heroMovie = await fetchAPI(`/movie/${trending.results[0].id}`);
-        if (heroMovie) setHero(heroMovie);
-    }
-    if (popular?.results?.length) main.appendChild(makeSection('🎬 Popular', popular.results));
-    if (topRated?.results?.length) main.appendChild(makeSection('⭐ Top Rated', topRated.results));
-    if (upcoming?.results?.length) main.appendChild(makeSection('📅 Upcoming', upcoming.results));
-    if (nowPlaying?.results?.length) main.appendChild(makeSection('🎭 Now Playing', nowPlaying.results));
-    
-    document.getElementById('loader').style.display = 'none';
-}
-
-document.addEventListener('DOMContentLoaded', init);
-
-// Keyboard close
+// ==================== KEYBOARD ====================
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Escape') {
+        closeTrailer();
+        closeDetail();
+    }
 });
+
+// ==================== INIT ====================
+document.addEventListener('DOMContentLoaded', () => {
+    loadHome();
+    toast('🎬 Welcome to Flixora!');
+});
+
+console.log('🚀 Flixora v2 - Asian & Hollywood Movies Ready!');
